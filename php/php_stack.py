@@ -9,7 +9,7 @@ class PhpStack(core.Stack):
     def __init__(self, scope: core.Construct, id: str, **kwargs) -> None:
         super().__init__(scope, id, **kwargs)
 
-        vpc = ec2.Vpc.from_lookup(self, "VPC", vpc_id='vpc-1234')
+        vpc = ec2.Vpc.from_lookup(self, "VPC", vpc_id=self.node.try_get_context("vpc_id"))
 
         lb = elbv2.ApplicationLoadBalancer(self, "LB",
             vpc=vpc,
@@ -18,21 +18,22 @@ class PhpStack(core.Stack):
 
         listener = lb.add_listener("Listener",
             port=443,
-
-            # 'open: true' is the default, you can leave it out if you want. Set it
-            # to 'false' and use `listener.connections` if you want to be selective
-            # about who can access the load balancer.
-            certificates=[certificatemanager.Certificate.from_certificate_arn(self, 'cert', 'arn:aws:acm:region:account:certificate/certificate_ID_1')],
-            open=True
+            certificates=[certificatemanager.Certificate.from_certificate_arn(self, 'cert', self.node.try_get_context("cert_arn"))],
         )
 
         asg = autoscaling.AutoScalingGroup(self, "ASG",
             vpc=vpc,
             instance_type=ec2.InstanceType.of(ec2.InstanceClass.BURSTABLE2, ec2.InstanceSize.MICRO),
-            machine_image=ec2.AmazonLinuxImage()
+            machine_image=ec2.MachineImage.lookup(name=self.node.try_get_context("ami_id"), owners=[self.account]),
+            min_capacity=5,
+            max_capacity=100
         )
 
         listener.add_targets("ApplicationFleet",
             port=8080,
             targets=[asg]
+        )
+
+        asg.scale_on_cpu_utilization("KeepSpareCPU",
+            target_utilization_percent=70
         )
